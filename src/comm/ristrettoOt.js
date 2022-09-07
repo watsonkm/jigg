@@ -5,11 +5,11 @@ const sodium = require('libsodium-wrappers-sumo');
 const crypto = require('../util/crypto.js');
 const labelParser = require('../parse/label.js');
 
-function OT(socket) {
+function RistrettoOT(socket) {
   this.socket = socket;
 }
 
-OT.prototype.send = function (tag, m0, m1) {
+RistrettoOT.prototype.send = function (tag, m0, m1) {
   const self = this;
   const _id = this.socket.nextId();
 
@@ -32,7 +32,7 @@ OT.prototype.send = function (tag, m0, m1) {
   });
 };
 
-OT.prototype.receive = function (tag, c) {
+RistrettoOT.prototype.receive = function (tag, c) {
   const self = this;
   const _id = this.socket.nextId();
 
@@ -59,4 +59,4 @@ OT.prototype.receive = function (tag, c) {
   });
 };
 
-module.exports = OT;
+module.exports = RistrettoOT;

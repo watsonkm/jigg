@@ -18,7 +18,8 @@ const evaluate = require('./evaluate.js');
 const circuitParser = require('./parse/parse.js');
 
 const Socket = require('./comm/clientSocket.js');
-const OT = require('./comm/ot.js');
+const RistrettoOT = require('./comm/ristrettoOt.js');
+const KyberOT = require('./comm/kyberOt.js');
 
 const hexutils = require('./util/hexutils.js');
 const sodium = require('libsodium-wrappers-sumo');
@@ -50,7 +51,13 @@ function Agent(role, hostname, options) {
   }
 
   this.role = role;
-  this.OT = new OT(this.socket);
+
+  if (options.use_pqc) {
+    this.OT = new KyberOT(this.socket);
+  } else {
+    this.OT = new RistrettoOT(this.socket);
+  }
+
   this.hexutils = hexutils;
 
   this.listeners = [];
