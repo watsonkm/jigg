@@ -5,6 +5,7 @@
   "main": "src/jigg.js",
   "dependencies": {
     "casm": "^0.2.2",
+    "crystals-kyber": "^5.1.0",
     "libsodium-wrappers-sumo": "^0.7.6",
     "socket.io": "^2.2.0"
   },
