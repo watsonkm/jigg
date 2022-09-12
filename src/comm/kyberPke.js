@@ -34,6 +34,21 @@ const paramsQ = 3329;
 const paramsQinv = 62209;
 const paramsETA = 2;
 
+function kyberCPAPubSeedGen() {
+    // random bytes for seed
+    let rnd = new Uint8Array(32);
+    webcrypto.getRandomValues(rnd);
+
+    // hash rnd with SHA3-512
+    const buffer1 = Buffer.from(rnd);
+    const hash1 = new SHA3(512);
+    hash1.update(buffer1);
+    let seed = new Uint8Array(hash1.digest());
+    let publicSeed = seed.slice(32, 64);   
+
+    return publicSeed;
+}
+
 function kyberCPAKeyGen(publicSeed) {
     // random bytes for seed
     let rnd = new Uint8Array(32);
@@ -139,7 +154,7 @@ function kyberCPAEncrypt(pk1, msg, coins) {
     for (let i = 0; i < paramsK; i++) {
         start = (i * 384);
         end = (i + 1) * 384;
-        pk[i] = polyFromBytes(pk1.slice(start, end));
+        pk[i] = polyFromBytesLossless(pk1.slice(start, end));
     }
     let seed = pk1.slice(1152, 1184);
 
@@ -324,7 +339,7 @@ function polyFromBytes(a) {
 }
 
 function polyFromBytesLossless(a) {
-    let r = new Array(256).fill(0);
+    let r = new Array(416).fill(0);
     for (let i = 0; i < paramsN / 8; i++) {
         r[8 * i + 0] = int16(((uint16(a[13 * i + 0]) >> 0) | (uint16(a[13 * i + 1]) << 8)) & 0x1FFF);
         r[8 * i + 1] = int16(((uint16(a[13 * i + 1]) >> 5) | (uint16(a[13 * i + 2]) << 3) |
