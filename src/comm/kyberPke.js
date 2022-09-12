@@ -1,7 +1,6 @@
 'use strict';
 
-// Kyber CPAPKE implementation borrowed and modified from  antontutoveanu / crystals-kyber-javascript   
-
+// Kyber CPAPKE implementation borrowed and modified from antontutoveanu / crystals-kyber-javascript   
 const { SHA3, SHAKE } = require('sha3');
 const webcrypto = require('crypto').webcrypto;
 
@@ -35,150 +34,7 @@ const paramsQ = 3329;
 const paramsQinv = 62209;
 const paramsETA = 2;
 
-KeyGen768 = function () {
-    // IND-CPA keypair
-    let indcpakeys = indcpaKeyGen();
-
-    let pk = indcpakeys[0];
-    let sk = indcpakeys[1];
-
-    // FO transform to make IND-CCA2
-
-    // get hash of pk
-    const buffer1 = Buffer.from(pk);
-    const hash1 = new SHA3(256);
-    hash1.update(buffer1);
-    let pkh = hash1.digest();
-
-    // read 32 random values (0-255) into a 32 byte array
-    let rnd = new Uint8Array(32);
-    webcrypto.getRandomValues(rnd); // web api cryptographically strong random values
-
-    // concatenate to form IND-CCA2 private key: sk + pk + h(pk) + rnd
-    for (let i = 0; i < pk.length; i++) {
-        sk.push(pk[i]);
-    }
-    for (let i = 0; i < pkh.length; i++) {
-        sk.push(pkh[i]);
-    }
-    for (let i = 0; i < rnd.length; i++) {
-        sk.push(rnd[i]);
-    }
-
-    let keys = new Array(2);
-    keys[0] = pk;
-    keys[1] = sk;
-    return keys;
-}
-
-Encrypt768 = function (pk) {
-
-    // random 32 bytes m
-    let m = new Uint8Array(32);
-    webcrypto.getRandomValues(m); // web api cryptographically strong random values
-
-    // hash m with SHA3-256
-    const buffer1 = Buffer.from(m);
-    const hash1 = new SHA3(256);
-    hash1.update(buffer1);
-    let mh = hash1.digest();
-
-    // hash pk with SHA3-256
-    const buffer2 = Buffer.from(pk);
-    const hash2 = new SHA3(256);
-    hash2.update(buffer2);
-    let pkh = hash2.digest();
-
-    // hash mh and pkh with SHA3-512
-    const buffer3 = Buffer.from(mh);
-    const buffer4 = Buffer.from(pkh);
-    const hash3 = new SHA3(512);
-    hash3.update(buffer3).update(buffer4);
-    let kr = new Uint8Array(hash3.digest());
-    let kr1 = kr.slice(0, 32);
-    let kr2 = kr.slice(32, 64);
-
-    // generate ciphertext c
-    let c = indcpaEncrypt(pk, mh, kr2);
-
-    // hash ciphertext with SHA3-256
-    const buffer5 = Buffer.from(c);
-    const hash4 = new SHA3(256);
-    hash4.update(buffer5);
-    let ch = hash4.digest();
-
-    // hash kr1 and ch with SHAKE-256
-    const buffer6 = Buffer.from(kr1);
-    const buffer7 = Buffer.from(ch);
-    const hash5 = new SHAKE(256);
-    hash5.update(buffer6).update(buffer7);
-    let ss = hash5.digest();
-
-    // output (c, ss)
-    let result = new Array(2);
-    result[0] = c;
-    result[1] = ss;
-
-    return result;
-}
-
-Decrypt768 = function (c, privateKey) {
-
-    // extract sk, pk, pkh and z
-    let sk = privateKey.slice(0, 1152);
-    let pk = privateKey.slice(1152, 2336);
-    let pkh = privateKey.slice(2336, 2368);
-    let z = privateKey.slice(2368, 2400);
-
-    // IND-CPA decrypt
-    let m = indcpaDecrypt(c, sk);
-
-    // hash m and pkh with SHA3-512
-    const buffer1 = Buffer.from(m);
-    const buffer2 = Buffer.from(pkh);
-    const hash1 = new SHA3(512);
-    hash1.update(buffer1).update(buffer2);
-    let kr = new Uint8Array(hash1.digest());
-    let kr1 = kr.slice(0, 32);
-    let kr2 = kr.slice(32, 64);
-
-    // IND-CPA encrypt
-    let cmp = indcpaEncrypt(pk, m, kr2);
-
-    // compare c and cmp
-    let fail = ArrayCompare(c, cmp) - 1;
-
-    // hash c with SHA3-256
-    const buffer3 = Buffer.from(c);
-    const hash2 = new SHA3(256);
-    hash2.update(buffer3);
-    let ch = hash2.digest();
-
-    let ss = [];
-    if (!fail) {
-        // hash kr1 and ch with SHAKE-256
-        const buffer4 = Buffer.from(kr1);
-        const buffer5 = Buffer.from(ch);
-        const hash3 = new SHAKE(256);
-        hash3.update(buffer4).update(buffer5);
-        ss = hash3.digest();
-    }
-    else {
-        // hash z and ch with SHAKE-256
-        const buffer6 = Buffer.from(z);
-        const buffer7 = Buffer.from(ch);
-        const hash4 = new SHAKE(256);
-        hash4.update(buffer6).update(buffer7);
-        ss = hash4.digest();
-    }
-    return ss;
-}
-/*****************************************************************************************************************************/
-
-// indcpaKeyGen generates public and private keys for the CPA-secure
-// public-key encryption scheme underlying Kyber.
-function indcpaKeyGen() {
-
+function kyberCPAKeyGen(publicSeed) {
     // random bytes for seed
     let rnd = new Uint8Array(32);
     webcrypto.getRandomValues(rnd); // web api cryptographically strong random values
@@ -188,7 +44,6 @@ function indcpaKeyGen() {
     const hash1 = new SHA3(512);
     hash1.update(buffer1);
     let seed = new Uint8Array(hash1.digest());
-    let publicSeed = seed.slice(0, 32);
     let noiseSeed = seed.slice(32, 64);
 
     // generate public matrix A (already in NTT form)
@@ -252,7 +107,7 @@ function indcpaKeyGen() {
     keys[0] = [];
     let bytes = [];
     for (let i = 0; i < paramsK; i++) {
-        bytes = polyToBytes(pk[i]);
+        bytes = polyToBytesLossless(pk[i]);
         for (let j = 0; j < bytes.length; j++) {
             keys[0].push(bytes[j]);
         }
@@ -275,12 +130,7 @@ function indcpaKeyGen() {
     return keys;
 }
 
-
-
-
-// indcpaEncrypt is the encryption function of the CPA-secure
-// public-key encryption scheme underlying Kyber.
-function indcpaEncrypt(pk1, msg, coins) {
+function kyberCPAEncrypt(pk1, msg, coins) {
 
     // DECODE PUBLIC KEY
     let pk = new Array(paramsK);
@@ -375,9 +225,7 @@ function indcpaEncrypt(pk1, msg, coins) {
     return c1.concat(c2);
 }
 
-// indcpaDecrypt is the decryption function of the CPA-secure
-// public-key encryption scheme underlying Kyber.
-function indcpaDecrypt(c, privateKey) {
+function kyberCPADecrypt(c, privateKey) {
 
     // extract ciphertext
     let u = decompress1(c.slice(0, 960));
@@ -435,6 +283,35 @@ function polyToBytes(a) {
     return r;
 }
 
+function polyToBytesLosseless(a) {
+    let t = new Array(8);
+    let r = new Array(416);
+    let a2 = subtract_q(a);
+
+    for (let i = 0; i < paramsN / 8; i++) {
+        // get 8 coefficient entries in the polynomial
+        for (let j = 0; j < 8; j++) {
+            t[j] = uint16(a2[2 * i + j]);
+        }
+
+        // convert this into 13 bytes
+        r[13 * i + 0] = byte(t[0] >> 0);                        
+        r[13 * i + 1] = byte(t[0] >> 8) | byte(t[1] << 5);      
+        r[13 * i + 2] = byte(t[1] >> 3);
+        r[13 * i + 3] = byte(t[1] >> 11) | byte(t[2] << 2);
+        r[13 * i + 4] = byte(t[2] >> 6) | byte(t[3] << 7);      
+        r[13 * i + 5] = byte(t[3] >> 1);                        
+        r[13 * i + 6] = byte(t[3] >> 9) | byte(t[4] << 4);      
+        r[13 * i + 7] = byte(t[0] >> 4);                        
+        r[13 * i + 8] = byte(t[4] >> 12) | byte(t[5] << 1);     
+        r[13 * i + 9] = byte(t[5] >> 7) | byte(t[6] << 6);      
+        r[13 * i + 10] = byte(t[6] >> 2);                       
+        r[13 * i + 11] = byte(t[6] >> 10) | byte(t[7] << 3);    
+        r[13 * i + 12] = byte(t[7] >> 0);                       
+    }
+    return r;
+}
+
 // polyFromBytes de-serialises an array of bytes into a polynomial,
 // and represents the inverse of polyToBytes.
 function polyFromBytes(a) {
@@ -442,6 +319,25 @@ function polyFromBytes(a) {
     for (let i = 0; i < paramsN / 2; i++) {
         r[2 * i] = int16(((uint16(a[3 * i + 0]) >> 0) | (uint16(a[3 * i + 1]) << 8)) & 0xFFF);
         r[2 * i + 1] = int16(((uint16(a[3 * i + 1]) >> 4) | (uint16(a[3 * i + 2]) << 4)) & 0xFFF);
+    }
+    return r;
+}
+
+function polyFromBytesLossless(a) {
+    let r = new Array(256).fill(0);
+    for (let i = 0; i < paramsN / 8; i++) {
+        r[8 * i + 0] = int16(((uint16(a[13 * i + 0]) >> 0) | (uint16(a[13 * i + 1]) << 8)) & 0x1FFF);
+        r[8 * i + 1] = int16(((uint16(a[13 * i + 1]) >> 5) | (uint16(a[13 * i + 2]) << 3) |
+            (uint16(a[13 * i + 3]) << 11)) & 0x1FFF);
+        r[8 * i + 2] = int16(((uint16(a[13 * i + 3]) >> 2) | (uint16(a[13 * i + 4]) << 6)) & 0x1FFF);
+        r[8 * i + 3] = int16(((uint16(a[13 * i + 4]) >> 7) | (uint16(a[13 * i + 5]) << 1) | 
+            (uint16(a[13 * i + 6]) << 9)) & 0x1FFF);
+        r[8 * i + 4] = int16(((uint16(a[13 * i + 6]) >> 4) | (uint16(a[13 * i + 7]) << 4) | 
+            (uint16(a[13 * i + 8]) << 12)) & 0x1FFF);
+        r[8 * i + 5] = int16(((uint16(a[13 * i + 8]) >> 1) | (uint16(a[13 * i + 9]) << 7)) & 0x1FFF);
+        r[8 * i + 6] = int16(((uint16(a[13 * i + 9]) >> 6) | (uint16(a[13 * i + 10]) << 2) |
+            (uint16(a[13 * i + 11] << 10))) & 0x1FFF);
+        r[8 * i + 7] = int16(((uint16(a[13 * i + 11]) >> 3) | (a[13 * i + 12]) << 5) & 0x1FFF);
     }
     return r;
 }
@@ -474,15 +370,6 @@ function polyFromMsg(msg) {
     }
     return r;
 }
-
-// polyReduce applies Barrett reduction to all coefficients of a polynomial.
-function polyReduce(r) {
-    for (let i = 0; i < paramsN; i++) {
-        r[i] = barrett(r[i]);
-    }
-    return r;
-}
-
 
 
 // generateMatrixA deterministically generates a matrix `A` (or the transpose of `A`)
@@ -971,7 +858,8 @@ function ArrayCompare(a, b) {
 }
 
 
-// Export functions to index.js (entry point)
-exports.KeyGen768 = KeyGen768;
-exports.Encrypt768 = Encrypt768;
-exports.Decrypt768 = Decrypt768;
+module.exports = {
+    kyberCPAKeyGen: kyberCPAKeyGen,
+    kyberCPAEncrypt: kyberCPAEncrypt,
+    kyberCPADecrypt: kyberCPADecrypt,
+}
