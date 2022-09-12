@@ -278,9 +278,9 @@ function hashPublicKey(pk) {
 
     for (let i = 0; i < paramsK; i++) {
         // run rejection sampling on the output from above
-        let outputlen = paramsK * 168;
+        let outputlen = 3 * 168;
         let result = new Array(2);
-        result = indcpaRejUniform(output.slice(0, outputlen), outputlen, paramsN);
+        result = indcpaRejUniform(output.slice(0, 504), outputlen, paramsN);
         t[i] = result[0]; // the result here is an NTT-representation
         ctr = result[1]; // keeps track of index of output array from sampling function
 
@@ -300,20 +300,46 @@ function hashPublicKey(pk) {
         }
     }
 
-    pk_out = [];
+    hash = [];
     bytes = [];
     for (let i = 0; i < paramsK; i++) {
         bytes = polyToBytes(t[i]);
         for (let j = 0; j < bytes.length; j++) {
-            pk_out.push(bytes[j]);
+            hash.push(bytes[j]);
         }
     }
 
-    return pk_out;
+    return hash;
 }
 
-function addPublicKeys(pk1, pk2) {
-    
+function addPublicKeys(pk0, pk1) {
+    pk = [];
+    for (let i = 0; i < paramsK; i++) {
+        a = polyFromBytes(pk0.slice(i * 384, (i + 1) * 384));
+        b = polyFromBytes(pk1.slice(i * 384, (i + 1) * 384));
+        sum = add(a, b);
+        bytes = polyToBytes(sum);
+        for (let j = 0; j < paramsN; j++) {
+            pk.push(bytes[j]);
+        }
+    }
+
+    return pk;
+}
+
+function subtractPublicKeys(pk0, pk1) {
+    pk = [];
+    for (let i = 0; i < paramsK; i++) {
+        a = polyFromBytes(pk0.slice(i * 384, (i + 1) * 384));
+        b = polyFromBytes(pk1.slice(i * 384, (i + 1) * 384));
+        diff = reduce(subtract(a, b));
+        bytes = polyToBytes(diff);
+        for (let j = 0; j < paramsN; j++) {
+            pk.push(bytes[j]);
+        }
+    }
+
+    return pk;
 }
 
 // polyvecFromBytes deserializes a vector of polynomials.
@@ -877,5 +903,7 @@ module.exports = {
     generateKeys: generateKeys,
     encrypt: encrypt,
     decrypt: decrypt,
-    hashPublicKey: hashPublicKey
+    hashPublicKey: hashPublicKey,
+    addPublicKeys: addPublicKeys,
+    subtractPublicKeys: subtractPublicKeys
 };
