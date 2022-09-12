@@ -1,6 +1,5 @@
 'use strict';
 
-// Kyber CPAPKE implementation borrowed and modified from antontutoveanu / crystals-kyber-javascript   
 const { SHA3, SHAKE } = require('sha3');
 const webcrypto = require('crypto').webcrypto;
 
@@ -34,22 +33,22 @@ const paramsQ = 3329;
 const paramsQinv = 62209;
 const paramsETA = 2;
 
-function kyberCPAPubSeedGen() {
+function generatePublicSeed() {
     // random bytes for seed
     let rnd = new Uint8Array(32);
-    webcrypto.getRandomValues(rnd);
+    webcrypto.getRandomValues(rnd); // web api cryptographically strong random values
 
     // hash rnd with SHA3-512
-    const buffer1 = Buffer.from(rnd);
-    const hash1 = new SHA3(512);
-    hash1.update(buffer1);
-    let seed = new Uint8Array(hash1.digest());
-    let publicSeed = seed.slice(32, 64);   
+    const buffer = Buffer.from(rnd);
+    const hash = new SHA3(512);
+    hash.update(buffer);
+    let seed = new Uint8Array(hash.digest());
+    let publicSeed = seed.slice(0, 32);
 
     return publicSeed;
 }
 
-function kyberCPAKeyGen(publicSeed) {
+function generateKeys(publicSeed) {
     // random bytes for seed
     let rnd = new Uint8Array(32);
     webcrypto.getRandomValues(rnd); // web api cryptographically strong random values
@@ -108,7 +107,7 @@ function kyberCPAKeyGen(publicSeed) {
     for (let i = 0; i < paramsK; i++) {
         pk[i] = add(pk[i], e[i]);
     }
-
+    
     // barrett reduction
     for (let i = 0; i < paramsK; i++) {
         pk[i] = reduce(pk[i]);
@@ -116,13 +115,13 @@ function kyberCPAKeyGen(publicSeed) {
 
     // ENCODE KEYS
     let keys = new Array(2);
-
+    
     // PUBLIC KEY
     // turn polynomials into byte arrays
     keys[0] = [];
     let bytes = [];
     for (let i = 0; i < paramsK; i++) {
-        bytes = polyToBytesLossless(pk[i]);
+        bytes = polyToBytes(pk[i]);
         for (let j = 0; j < bytes.length; j++) {
             keys[0].push(bytes[j]);
         }
@@ -145,8 +144,12 @@ function kyberCPAKeyGen(publicSeed) {
     return keys;
 }
 
-function kyberCPAEncrypt(pk1, msg, coins) {
 
+
+
+// encrypt is the encryption function of the CPA-secure
+// public-key encryption scheme underlying Kyber.
+function encrypt(pk1, msg, coins) {
     // DECODE PUBLIC KEY
     let pk = new Array(paramsK);
     let start;
@@ -154,7 +157,7 @@ function kyberCPAEncrypt(pk1, msg, coins) {
     for (let i = 0; i < paramsK; i++) {
         start = (i * 384);
         end = (i + 1) * 384;
-        pk[i] = polyFromBytesLossless(pk1.slice(start, end));
+        pk[i] = polyFromBytes(pk1.slice(start, end));
     }
     let seed = pk1.slice(1152, 1184);
 
@@ -240,8 +243,9 @@ function kyberCPAEncrypt(pk1, msg, coins) {
     return c1.concat(c2);
 }
 
-function kyberCPADecrypt(c, privateKey) {
-
+// decrypt is the decryption function of the CPA-secure
+// public-key encryption scheme underlying Kyber.
+function decrypt(c, privateKey) {
     // extract ciphertext
     let u = decompress1(c.slice(0, 960));
     let v = decompress2(c.slice(960, 1088));
@@ -261,6 +265,55 @@ function kyberCPADecrypt(c, privateKey) {
     mp = reduce(mp);
 
     return polyToMsg(mp);
+}
+
+function hashPublicKey(pk) {
+    // hash pk with SHAKE-128
+    const buffer = Buffer.from(pk);
+    const xof = new SHAKE(128);
+    xof.update(buffer);
+    let output = new Uint8Array(xof.digest({buffer: Buffer.alloc(672)}));
+
+    let t = new Array(3);
+
+    for (let i = 0; i < paramsK; i++) {
+        // run rejection sampling on the output from above
+        let outputlen = paramsK * 168;
+        let result = new Array(2);
+        result = indcpaRejUniform(output.slice(0, outputlen), outputlen, paramsN);
+        t[i] = result[0]; // the result here is an NTT-representation
+        ctr = result[1]; // keeps track of index of output array from sampling function
+
+        while (ctr < paramsN) { // if the polynomial hasnt been filled yet with mod q entries
+
+            let outputn = output.slice(504, 672); // take last 168 bytes of byte array from xof
+
+            let result1 = new Array(2);
+            result1 = indcpaRejUniform(outputn, 168, paramsN-ctr); // run sampling function again
+            let missing = result1[0]; // here is additional mod q polynomial coefficients
+            let ctrn = result1[1]; // how many coefficients were accepted and are in the output
+            // starting at last position of output array from first sampling function until 256 is reached
+            for (let j = ctr; j < paramsN; j++) { 
+                t[i][j] = missing[j-ctr]; // fill rest of array with the additional coefficients until full
+            }
+            ctr = ctr + ctrn; // update index
+        }
+    }
+
+    pk_out = [];
+    bytes = [];
+    for (let i = 0; i < paramsK; i++) {
+        bytes = polyToBytes(t[i]);
+        for (let j = 0; j < bytes.length; j++) {
+            pk_out.push(bytes[j]);
+        }
+    }
+
+    return pk_out;
+}
+
+function addPublicKeys(pk1, pk2) {
+    
 }
 
 // polyvecFromBytes deserializes a vector of polynomials.
@@ -298,35 +351,6 @@ function polyToBytes(a) {
     return r;
 }
 
-function polyToBytesLosseless(a) {
-    let t = new Array(8);
-    let r = new Array(416);
-    let a2 = subtract_q(a);
-
-    for (let i = 0; i < paramsN / 8; i++) {
-        // get 8 coefficient entries in the polynomial
-        for (let j = 0; j < 8; j++) {
-            t[j] = uint16(a2[2 * i + j]);
-        }
-
-        // convert this into 13 bytes
-        r[13 * i + 0] = byte(t[0] >> 0);                        
-        r[13 * i + 1] = byte(t[0] >> 8) | byte(t[1] << 5);      
-        r[13 * i + 2] = byte(t[1] >> 3);
-        r[13 * i + 3] = byte(t[1] >> 11) | byte(t[2] << 2);
-        r[13 * i + 4] = byte(t[2] >> 6) | byte(t[3] << 7);      
-        r[13 * i + 5] = byte(t[3] >> 1);                        
-        r[13 * i + 6] = byte(t[3] >> 9) | byte(t[4] << 4);      
-        r[13 * i + 7] = byte(t[0] >> 4);                        
-        r[13 * i + 8] = byte(t[4] >> 12) | byte(t[5] << 1);     
-        r[13 * i + 9] = byte(t[5] >> 7) | byte(t[6] << 6);      
-        r[13 * i + 10] = byte(t[6] >> 2);                       
-        r[13 * i + 11] = byte(t[6] >> 10) | byte(t[7] << 3);    
-        r[13 * i + 12] = byte(t[7] >> 0);                       
-    }
-    return r;
-}
-
 // polyFromBytes de-serialises an array of bytes into a polynomial,
 // and represents the inverse of polyToBytes.
 function polyFromBytes(a) {
@@ -334,25 +358,6 @@ function polyFromBytes(a) {
     for (let i = 0; i < paramsN / 2; i++) {
         r[2 * i] = int16(((uint16(a[3 * i + 0]) >> 0) | (uint16(a[3 * i + 1]) << 8)) & 0xFFF);
         r[2 * i + 1] = int16(((uint16(a[3 * i + 1]) >> 4) | (uint16(a[3 * i + 2]) << 4)) & 0xFFF);
-    }
-    return r;
-}
-
-function polyFromBytesLossless(a) {
-    let r = new Array(416).fill(0);
-    for (let i = 0; i < paramsN / 8; i++) {
-        r[8 * i + 0] = int16(((uint16(a[13 * i + 0]) >> 0) | (uint16(a[13 * i + 1]) << 8)) & 0x1FFF);
-        r[8 * i + 1] = int16(((uint16(a[13 * i + 1]) >> 5) | (uint16(a[13 * i + 2]) << 3) |
-            (uint16(a[13 * i + 3]) << 11)) & 0x1FFF);
-        r[8 * i + 2] = int16(((uint16(a[13 * i + 3]) >> 2) | (uint16(a[13 * i + 4]) << 6)) & 0x1FFF);
-        r[8 * i + 3] = int16(((uint16(a[13 * i + 4]) >> 7) | (uint16(a[13 * i + 5]) << 1) | 
-            (uint16(a[13 * i + 6]) << 9)) & 0x1FFF);
-        r[8 * i + 4] = int16(((uint16(a[13 * i + 6]) >> 4) | (uint16(a[13 * i + 7]) << 4) | 
-            (uint16(a[13 * i + 8]) << 12)) & 0x1FFF);
-        r[8 * i + 5] = int16(((uint16(a[13 * i + 8]) >> 1) | (uint16(a[13 * i + 9]) << 7)) & 0x1FFF);
-        r[8 * i + 6] = int16(((uint16(a[13 * i + 9]) >> 6) | (uint16(a[13 * i + 10]) << 2) |
-            (uint16(a[13 * i + 11] << 10))) & 0x1FFF);
-        r[8 * i + 7] = int16(((uint16(a[13 * i + 11]) >> 3) | (a[13 * i + 12]) << 5) & 0x1FFF);
     }
     return r;
 }
@@ -386,6 +391,15 @@ function polyFromMsg(msg) {
     return r;
 }
 
+// polyReduce applies Barrett reduction to all coefficients of a polynomial.
+function polyReduce(r) {
+    for (let i = 0; i < paramsN; i++) {
+        r[i] = barrett(r[i]);
+    }
+    return r;
+}
+
+
 
 // generateMatrixA deterministically generates a matrix `A` (or the transpose of `A`)
 // from a seed. Entries of the matrix are polynomials that look uniformly random.
@@ -416,12 +430,12 @@ function generateMatrixA(seed, transposed) {
             const buffer1 = Buffer.from(seed);
             const buffer2 = Buffer.from(transpose);
             xof.update(buffer1).update(buffer2);
-            let output = new Uint8Array(xof.digest({ buffer: Buffer.alloc(672) }));
+            let output = new Uint8Array(xof.digest({buffer: Buffer.alloc(672)}));
 
             // run rejection sampling on the output from above
             let outputlen = 3 * 168; // 504
             let result = new Array(2);
-            result = indcpaRejUniform(output.slice(0, 504), outputlen, paramsN);
+            result = indcpaRejUniform(output.slice(0,504), outputlen, paramsN);
             a[i][j] = result[0]; // the result here is an NTT-representation
             ctr = result[1]; // keeps track of index of output array from sampling function
 
@@ -430,12 +444,12 @@ function generateMatrixA(seed, transposed) {
                 let outputn = output.slice(504, 672); // take last 168 bytes of byte array from xof
 
                 let result1 = new Array(2);
-                result1 = indcpaRejUniform(outputn, 168, paramsN - ctr); // run sampling function again
+                result1 = indcpaRejUniform(outputn, 168, paramsN-ctr); // run sampling function again
                 let missing = result1[0]; // here is additional mod q polynomial coefficients
                 let ctrn = result1[1]; // how many coefficients were accepted and are in the output
                 // starting at last position of output array from first sampling function until 256 is reached
-                for (let k = ctr; k < paramsN; k++) {
-                    a[i][j][k] = missing[k - ctr]; // fill rest of array with the additional coefficients until full
+                for (let k = ctr; k < paramsN; k++) { 
+                    a[i][j][k] = missing[k-ctr]; // fill rest of array with the additional coefficients until full
                 }
                 ctr = ctr + ctrn; // update index
             }
@@ -474,7 +488,7 @@ function indcpaRejUniform(buf, bufl, len) {
             ctr = ctr + 1;
         }
 
-
+        
     }
 
     let result = new Array(2);
@@ -503,7 +517,7 @@ function prf(l, key, nonce) {
     const buffer1 = Buffer.from(key);
     const buffer2 = Buffer.from(nonce_arr);
     hash.update(buffer1).update(buffer2);
-    let buf = hash.digest({ buffer: Buffer.alloc(l) }); // 128 long byte array
+    let buf = hash.digest({ buffer: Buffer.alloc(l)}); // 128 long byte array
     return buf;
 }
 
@@ -513,7 +527,7 @@ function prf(l, key, nonce) {
 function byteopsCbd(buf) {
     let t, d;
     let a, b;
-    let r = new Array(384).fill(0);
+    let r = new Array(384).fill(0); 
     for (let i = 0; i < paramsN / 8; i++) {
         t = (byteopsLoad32(buf.slice(4 * i, buf.length)) >>> 0);
         d = ((t & 0x55555555) >>> 0);
@@ -558,7 +572,7 @@ function ntt(r) {
                 r[j + l] = r[j] - t;
                 // add t back again to the opposite subsection
                 r[j] = r[j] + t;
-
+                
             }
         }
     }
@@ -583,7 +597,7 @@ function reduce(r) {
 // a integer `a`, returns a integer congruent to
 // `a mod Q` in {0,...,Q}.
 function barrett(a) {
-    let v = ((1 << 24) + paramsQ / 2) / paramsQ;
+    let v = ( (1<<24) + paramsQ / 2) / paramsQ;
     let t = v * a >> 24;
     t = t * paramsQ;
     return a - t;
@@ -669,10 +683,11 @@ function add(a, b) {
 
 // subtracts two polynomials.
 function subtract(a, b) {
+    let c = new Array(384);
     for (let i = 0; i < paramsN; i++) {
-        a[i] = a[i] - b[i];
+        c[i] = a[i] - b[i];
     }
-    return a;
+    return c;
 }
 
 // nttInverse performs an inplace inverse number-theoretic transform (NTT)
@@ -857,24 +872,10 @@ function uint32(n) {
     return n;
 }
 
-// compares two arrays and returns 1 if they are the same or 0 if not
-function ArrayCompare(a, b) {
-    // check array lengths
-    if (a.length != b.length) {
-        return 0;
-    }
-    // check contents
-    for (let i = 0; i < a.length; i++) {
-        if (a[i] != b[i]) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-
 module.exports = {
-    kyberCPAKeyGen: kyberCPAKeyGen,
-    kyberCPAEncrypt: kyberCPAEncrypt,
-    kyberCPADecrypt: kyberCPADecrypt,
-}
+    generatePublicSeed: generatePublicSeed,
+    generateKeys: generateKeys,
+    encrypt: encrypt,
+    decrypt: decrypt,
+    hashPublicKey: hashPublicKey
+};
